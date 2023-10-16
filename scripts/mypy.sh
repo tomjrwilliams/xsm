@@ -1,0 +1,1 @@
+python -m mypy ./ --check-untyped-defs --soft-error-limit=-1
