@@ -11,3 +11,8 @@ sys.path.append("./__local__")
 sys.path.append("./src")
 
 sys.path.append(os.environ["xtuples"])
+
+from .xsm import *
+
+from . import brokers
+from . import observers

@@ -1,15 +1,13 @@
 
 from __future__ import annotations
 
-import enum
-
+import abc
 import operator
 import collections
-# import collections.abc
 import functools
 import itertools
-from re import A
-from tkinter import Y
+
+import asyncio
 
 import typing
 import datetime
@@ -26,164 +24,121 @@ import optax # type: ignore
 
 import xtuples as xt
 
-import abc
-
-
 # ------------------------------------------------------
 
-E = typing.TypeVar('E', covariant=True)
 T = typing.TypeVar('T')
 
 # ------------------------------------------------------
 
 
-class Tag(typing.NamedTuple):
+class Tag(typing.Protocol):
     pass
 
 
-# ------------------------------------------------------
+Tags = xt.iTuple[Tag]
 
-
-class Event(typing.Protocol[E]):
-
-    @property
-    def tags(self) -> xt.iTuple[Tag]: ...
-
-    @property
-    def prev(self) -> E: ...
-
-    @property
-    def next(self) -> E: ...
-
-    @abc.abstractmethod
-    def __init__(
-        self,
-        tags: xt.iTuple[Tag],
-        prev: E,
-        next: E,
-    ) -> None: ...
-
-    # async?
-    @abc.abstractmethod
-    def dispatch(
-        self: Event[E],
-        #
-    ): ...
-
-def dispatch(self: Event[E]):
-    return
 
 # ------------------------------------------------------
 
 
-class Observer(typing.Protocol):
-
-    tags: xt.iTuple[Tag]
+class Broker(typing.Protocol):
 
     @abc.abstractmethod
-    def matches(
-        self,
-        event: Event,
-    ):
+    async def receive(self, state: State[T]):
         return
 
+    @abc.abstractmethod
+    async def flush(self):
+        return
 
+        
 # ------------------------------------------------------
 
+VorF = typing.Union[T, typing.Callable[[T], T]]
 
 class State(typing.Protocol[T]):
 
     @property
-    def tags(self) -> xt.iTuple[Tag]: ...
+    def curr(self) -> T: ...
 
     @property
-    def value(self) -> T: ...
+    def tags(self) -> Tags: ...
+
+    @property
+    def broker(self) -> Broker: ...
+
+    @property
+    def prev(self) -> typing.Optional[T]: ...
 
     @abc.abstractmethod
-    def _replace(
-        self: State[T],
-        *,
-        tags: xt.iTuple[Tag],
-        value: T,
+    async def update(
+        self: State[T], v_or_f: VorF[T]
     ) -> State[T]: ...
 
     @abc.abstractmethod
-    def update(
-        self: State[T],
-        cls: typing.Type[Event[T]],
-        value: T,
-        #
-    ) -> State[T]: ...
+    def _replace(self: State[T], **kwargs) -> State[T]: ...
 
+States = xt.iTuple[State[T]]
 
 # ------------------------------------------------------
 
-
-def update(
+async def update(
     self: State[T],
-    cls: typing.Type[Event[T]],
-    value: T,
+    v_or_f: VorF[T],
+) -> State[T]:
+
+    curr: T = self.curr
+
+    if isinstance(v_or_f, type(curr)):
+        v = typing.cast(T, v_or_f)
+    else:
+        v = typing.cast(typing.Callable[[T], T], v_or_f)(curr)
+
+    res = self._replace(curr=v, prev=curr)
+    await self.broker.receive(res)
+
+    return res
+
+# ------------------------------------------------------
+
+class Observer(typing.Protocol):
+
+    @property
+    def tags(self) -> Tags: ...
+
+    @abc.abstractmethod
+    async def receive(self, state: State): ...
+
+Observers = xt.iTuple[Observer]
+
+# ------------------------------------------------------
+
+async def run(
+    broker: Broker, 
+    seconds: typing.Optional[int] = None,
+    timeout: bool = True,
 ):
-    event: Event[T] = cls(self.tags, self.value, value)
-    event.dispatch()
-    return self._replace(tags = self.tags, value=value)
+    done = False
+    start = datetime.datetime.now()
 
+    while not done:
 
-# ------------------------------------------------------
+        elapsed: float = (
+            datetime.datetime.now() - start
+        ).seconds
 
-Floats = xt.iTuple[float]
-
-# ------------------------------------------------------
-
-@xt.nTuple.decorate(dispatch = dispatch)
-class Prices_Event(typing.NamedTuple):
-
-    tags: xt.iTuple[Tag]
-
-    prev: Floats
-    next: Floats
-    
-    def dispatch(  # type: ignore[empty-body]
-        self: Prices_Event
-    ): ...
-
-# ------------------------------------------------------
-
-@xt.nTuple.decorate(update = update)
-class Prices(typing.NamedTuple):
-
-    tags: xt.iTuple[Tag]
-    value: Floats
-
-    def update( # type: ignore[empty-body]
-        self: State[Floats],
-        cls: typing.Type[Event[Floats]],
-        value: T,
-    ) -> State[Floats]: ...
-
-# ------------------------------------------------------
-
-t: State = Prices(
-    xt.iTuple([
-        Tag(),
-        #
-    ]), 
-    xt.iTuple([1.]),
-    #
-)
-
-e: Event = Prices_Event(
-    xt.iTuple([
-        Tag(),
-        #
-    ]), 
-    xt.iTuple([1.]),
-    xt.iTuple([2.]),
-)
-
-t = t.update(
-    Prices_Event,
-    xt.iTuple([2.])
-)
+        if seconds is None:
+            done = (await broker.flush()) == 0
+        elif elapsed >= seconds:
+            done = True
+        elif timeout:
+            try:
+                done = (await asyncio.wait_for(
+                    broker.flush(), timeout = seconds - elapsed
+                )) == 0
+            except asyncio.TimeoutError:
+                done = True
+        else:
+            done = (await broker.flush()) == 0
 
 # ------------------------------------------------------
