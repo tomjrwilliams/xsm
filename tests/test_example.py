@@ -104,11 +104,12 @@ async def main_example():
     iTuple(0.9)
     iTuple(1.0)
     """
-    broker: xsm.Broker = xsm.brokers.Simple()
+    broker: xsm.Broker = xsm.brokers.Simple(
+        collections.deque()
+    )
     
-    obs_incr: xsm.observers.Simple = xsm.observers.Simple.with_handler(Handle_Incr())
-
-    obs_print: xsm.observers.Simple =xsm.observers.Simple.with_handler(Handle_Print())
+    obs_incr = xsm.observers.Simple.with_handler(Handle_Incr())
+    obs_print = xsm.observers.Simple.with_handler(Handle_Print())
 
     observers = xsm.Observers([
         obs_incr,

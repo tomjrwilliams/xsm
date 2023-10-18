@@ -35,7 +35,7 @@ T = typing.TypeVar('T')
 @xt.nTuple.decorate()
 class Simple(typing.NamedTuple):
 
-    queue: collections.deque = collections.deque()
+    queue: collections.deque
 
     async def receive(self, state: xsm.State[T]):
         self.queue.append(state)
