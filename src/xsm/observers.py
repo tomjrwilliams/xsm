@@ -31,3 +31,26 @@ from . import xsm
 T = typing.TypeVar('T')
 
 # ------------------------------------------------------
+
+class Asyncio_Deque(typing.Protocol):
+
+    @property
+    def tags(self) -> xsm.Tags: ...
+
+    @property
+    def queue(self) -> collections.deque: ...
+
+    @abc.abstractmethod
+    async def matches(self, state: xsm.State) -> bool: ...
+
+    @staticmethod
+    def interface():
+        return dict(
+            receive=receive,
+        )
+    
+async def receive(self: Asyncio_Deque, state: xsm.State[T]):
+    if (await self.matches(state)):
+        self.queue.append(state)
+
+# ------------------------------------------------------

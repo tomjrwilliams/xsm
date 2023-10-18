@@ -33,20 +33,22 @@ T = typing.TypeVar('T')
 # ------------------------------------------------------
 
 @xt.nTuple.decorate()
-class Asyncio(typing.NamedTuple):
+class Asyncio_Deque(typing.NamedTuple):
 
-    observers: xsm.Observers = xt.iTuple([])
     queue: collections.deque = collections.deque()
 
     async def receive(self, state: xsm.State[T]):
         self.queue.append(state)
 
-    async def flush(self) -> int:
-        states = xt.iTuple(self.queue)
+    async def flush(
+        self, 
+        observers: xsm.Observers
+    ) -> Asyncio_Deque:
+        states = xsm.States(self.queue)
         self.queue.clear()
         await asyncio.gather(
-            *states.map(lambda s: self.observers.map(
-                lambda o: o.receive(s)
+            *states.map(lambda s: observers.map(
+                operator.methodcaller("receive", s)
             )).flatten()
         )
         return states.len()

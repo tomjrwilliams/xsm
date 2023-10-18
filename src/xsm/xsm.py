@@ -65,18 +65,19 @@ class State(typing.Protocol[T]):
     def tags(self) -> Tags: ...
 
     @property
-    def broker(self) -> Broker: ...
-
-    @property
     def prev(self) -> typing.Optional[T]: ...
 
     @abc.abstractmethod
     async def update(
-        self: State[T], v_or_f: VorF[T]
+        self: State[T], v_or_f: VorF[T], broker: Broker
     ) -> State[T]: ...
 
     @abc.abstractmethod
     def _replace(self: State[T], **kwargs) -> State[T]: ...
+
+    @staticmethod
+    def interface():
+        return dict(update=update)
 
 States = xt.iTuple[State[T]]
 
@@ -85,6 +86,7 @@ States = xt.iTuple[State[T]]
 async def update(
     self: State[T],
     v_or_f: VorF[T],
+    broker: Broker,
 ) -> State[T]:
 
     curr: T = self.curr
@@ -95,7 +97,7 @@ async def update(
         v = typing.cast(typing.Callable[[T], T], v_or_f)(curr)
 
     res = self._replace(curr=v, prev=curr)
-    await self.broker.receive(res)
+    await broker.receive(res)
 
     return res
 
@@ -107,38 +109,86 @@ class Observer(typing.Protocol):
     def tags(self) -> Tags: ...
 
     @abc.abstractmethod
+    async def matches(self, state: State) -> bool: ...
+
+    @abc.abstractmethod
     async def receive(self, state: State): ...
+
+    @abc.abstractmethod
+    async def flush(self, broker: Broker) -> Observer: ...
 
 Observers = xt.iTuple[Observer]
 
 # ------------------------------------------------------
 
-async def run(
-    broker: Broker, 
+async def flush(
+    awaitable,
+    f_done,
+    start: datetime.datetime,
     seconds: typing.Optional[int] = None,
     timeout: bool = True,
 ):
+    elapsed: float = (
+        datetime.datetime.now() - start
+    ).seconds
+
+    if seconds is None:
+        res = await awaitable
+        done = f_done(res)
+    elif elapsed >= seconds:
+        res = None
+        done = True
+    elif timeout:
+        try:
+            res = await asyncio.wait_for(
+                awaitable, 
+                timeout = seconds - elapsed
+            )
+            done = f_done(res)
+        except asyncio.TimeoutError:
+            res = None
+            done = True
+    else:
+        res = await awaitable
+        done = f_done(res)
+
+    return res, done
+
+async def loop(
+    broker: Broker,
+    observers: Observers, 
+    seconds: typing.Optional[int] = None,
+    timeout: bool = True,
+    iters: typing.Optional[int] = None
+) -> Observers:
+
     done = False
     start = datetime.datetime.now()
+    i = 0
 
     while not done:
+        if iters is not None and i == iters:
+            break
+        _, done = await flush(
+            broker.flush(observers),
+            lambda changes: changes == 0,
+            start,
+            seconds=seconds,
+            timeout=timeout,
+        )
+        if done: break
+        _observers, done = await flush(
+            asyncio.gather(*observers.map(
+                operator.methodcaller("flush", broker)
+            )),
+            lambda _: done,
+            start,
+            seconds=seconds,
+            timeout=timeout,
+        )
+        i += 1
+        observers = xt.iTuple(_observers)
 
-        elapsed: float = (
-            datetime.datetime.now() - start
-        ).seconds
-
-        if seconds is None:
-            done = (await broker.flush()) == 0
-        elif elapsed >= seconds:
-            done = True
-        elif timeout:
-            try:
-                done = (await asyncio.wait_for(
-                    broker.flush(), timeout = seconds - elapsed
-                )) == 0
-            except asyncio.TimeoutError:
-                done = True
-        else:
-            done = (await broker.flush()) == 0
+    return observers
 
 # ------------------------------------------------------
