@@ -47,7 +47,7 @@ class Prices(typing.NamedTuple):
 
 # ------------------------------------------------------
 
-@xt.nTuple.decorate(**xsm.observers.Asyncio_Deque.interface())
+@xt.nTuple.decorate(**xsm.observers.Simple.interface())
 class Observer_Incr(typing.NamedTuple):
 
     tags: xsm.Tags = xsm.Tags()
@@ -55,27 +55,33 @@ class Observer_Incr(typing.NamedTuple):
     
     #  --
 
-    async def matches(self, state: xsm.State):
-        return True
-
     async def receive( # type: ignore[empty-body]
         self, state: xsm.State
     ): ...
 
-    async def flush(self, broker: xsm.Broker) -> Observer_Incr:
-        states = xt.iTuple(self.queue)
-        self.queue.clear()
+    async def flush( # type: ignore[empty-body]
+        self, broker: xsm.Broker
+    ) -> Observer_Incr: ...
+    
+    #  --
+
+    async def matches(self, state: xsm.State):
+        return True
+
+    async def handle(
+        self, states: xsm.States, broker: xsm.Broker
+    ) -> Observer_Incr:
         for state in states:
             if isinstance(state, Prices):
                 if state.curr.any(lambda v: v >= 1):
-                    return
+                    return self
                 await state.update(
                     state.curr.map(lambda v: round(v + 0.1, 3)),
                     broker=broker
                 )
         return self
 
-@xt.nTuple.decorate(**xsm.observers.Asyncio_Deque.interface())
+@xt.nTuple.decorate(**xsm.observers.Simple.interface())
 class Observer_Print(typing.NamedTuple):
 
     tags: xsm.Tags = xsm.Tags()
@@ -83,16 +89,22 @@ class Observer_Print(typing.NamedTuple):
     
     #  --
 
-    async def matches(self, state: xsm.State):
-        return True
-
     async def receive( # type: ignore[empty-body]
         self, state: xsm.State
     ): ...
 
-    async def flush(self, broker: xsm.Broker) -> Observer_Print:
-        states = xt.iTuple(self.queue)
-        self.queue.clear()
+    async def flush( # type: ignore[empty-body]
+        self, broker: xsm.Broker
+    ) -> Observer_Incr: ...
+    
+    #  --
+
+    async def matches(self, state: xsm.State):
+        return True
+
+    async def handle(
+        self, states: xsm.States, broker: xsm.Broker
+    ) -> Observer_Print:
         for state in states:
             print(state.curr)
         return self
@@ -114,7 +126,7 @@ async def main_example():
     iTuple(0.9)
     iTuple(1.0)
     """
-    broker: xsm.Broker = xsm.brokers.Asyncio_Deque()
+    broker: xsm.Broker = xsm.brokers.Simple()
     observers = xsm.Observers([
         Observer_Incr(),
         Observer_Print(),

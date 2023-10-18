@@ -44,12 +44,13 @@ Tags = xt.iTuple[Tag]
 class Broker(typing.Protocol):
 
     @abc.abstractmethod
-    async def receive(self, state: State[T]):
-        return
+    async def receive(self, state: State[T]): ...
 
     @abc.abstractmethod
-    async def flush(self):
-        return
+    async def flush(
+        self,
+        observers: Observers,
+    ) -> int: ...
 
         
 # ------------------------------------------------------

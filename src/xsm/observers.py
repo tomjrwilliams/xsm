@@ -32,7 +32,7 @@ T = typing.TypeVar('T')
 
 # ------------------------------------------------------
 
-class Asyncio_Deque(typing.Protocol):
+class Simple(typing.Protocol):
 
     @property
     def tags(self) -> xsm.Tags: ...
@@ -43,14 +43,26 @@ class Asyncio_Deque(typing.Protocol):
     @abc.abstractmethod
     async def matches(self, state: xsm.State) -> bool: ...
 
+    @abc.abstractmethod
+    async def handle(self, states: xsm.States) -> Simple: ...
+        
+    @staticmethod
+    async def _flush(self, broker: xsm.Broker) -> Simple:
+        states: xsm.States = xsm.States(self.queue)
+        self.queue.clear()
+        return await self.handle(states, broker)
+
+    @staticmethod
+    async def _receive(self: Simple, state: xsm.State[T]):
+        if (await self.matches(state)):
+            self.queue.append(state)
+
     @staticmethod
     def interface():
         return dict(
-            receive=receive,
+            receive=Simple._receive,
+            flush=Simple._flush
         )
-    
-async def receive(self: Asyncio_Deque, state: xsm.State[T]):
-    if (await self.matches(state)):
-        self.queue.append(state)
+
 
 # ------------------------------------------------------

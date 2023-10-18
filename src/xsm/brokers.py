@@ -33,7 +33,7 @@ T = typing.TypeVar('T')
 # ------------------------------------------------------
 
 @xt.nTuple.decorate()
-class Asyncio_Deque(typing.NamedTuple):
+class Simple(typing.NamedTuple):
 
     queue: collections.deque = collections.deque()
 
@@ -42,8 +42,8 @@ class Asyncio_Deque(typing.NamedTuple):
 
     async def flush(
         self, 
-        observers: xsm.Observers
-    ) -> Asyncio_Deque:
+        observers: xsm.Observers,
+    ) -> int:
         states = xsm.States(self.queue)
         self.queue.clear()
         await asyncio.gather(
