@@ -46,6 +46,7 @@ class Simple(typing.NamedTuple):
     ) -> int:
         states = xsm.States(self.queue)
         self.queue.clear()
+
         await asyncio.gather(
             *states.map(lambda s: observers.filter(
                 operator.methodcaller("matches", s)

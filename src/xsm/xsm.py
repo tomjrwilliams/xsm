@@ -106,6 +106,22 @@ async def update(
 
 class Observer(typing.Protocol):
 
+    # NOTE:
+    # matches() should be a simple tags vs tags comparison
+    # and thus doesn't need to be async (and should be natively parallelised within the map / filter - check?)
+    
+    # NOTE: receive(), however, may contain logic for eg.
+    # making db / io calls to log the relevant state change
+    # so does need to be async
+
+    # NOTE: likewise, flush() may well have external calling logic
+    # either to get data, or to store the event, other logging
+    # so does need to be async
+
+    # NOTE: because flush is called on every observer on every pass
+    # it functions as a heart-beat as well as event response
+    # at least assuming observers.Simple._flush(skip_empty=False)
+
     @property
     def tags(self) -> Tags: ...
 
@@ -170,14 +186,6 @@ async def loop(
     while not done:
         if iters is not None and i == iters:
             break
-        _, done = await flush(
-            broker.flush(observers),
-            lambda changes: changes == 0,
-            start,
-            seconds=seconds,
-            timeout=timeout,
-        )
-        if done: break
         _observers, done = await flush(
             asyncio.gather(*observers.map(
                 operator.methodcaller("flush", broker)
@@ -187,8 +195,15 @@ async def loop(
             seconds=seconds,
             timeout=timeout,
         )
-        i += 1
         observers = xt.iTuple(_observers)
+        _, done = await flush(
+            broker.flush(observers),
+            lambda changes: changes == 0,
+            start,
+            seconds=seconds,
+            timeout=timeout,
+        )
+        i += 1
 
     return observers
 

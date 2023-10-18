@@ -47,30 +47,19 @@ class Prices(typing.NamedTuple):
 
 # ------------------------------------------------------
 
-@xt.nTuple.decorate(**xsm.observers.Simple.interface())
-class Observer_Incr(typing.NamedTuple):
+@xt.nTuple.decorate()
+class Handle_Incr(typing.NamedTuple):
 
-    tags: xsm.Tags = xsm.Tags()
-    queue: collections.deque = collections.deque([])
-    
-    #  --
-
-    async def receive( # type: ignore[empty-body]
-        self, state: xsm.State
-    ): ...
-
-    async def flush( # type: ignore[empty-body]
-        self, broker: xsm.Broker
-    ) -> Observer_Incr: ...
-    
-    #  --
-
-    def matches(self, state: xsm.State):
+    def matches(
+        self,
+        observer: xsm.observers.Handled,
+        state: xsm.State
+    ) -> bool:
         return True
 
     async def handle(
         self, states: xsm.States, broker: xsm.Broker
-    ) -> Observer_Incr:
+    ) -> Handle_Incr:
         for state in states:
             if isinstance(state, Prices):
                 if state.curr.any(lambda v: v >= 1):
@@ -81,30 +70,19 @@ class Observer_Incr(typing.NamedTuple):
                 )
         return self
 
-@xt.nTuple.decorate(**xsm.observers.Simple.interface())
-class Observer_Print(typing.NamedTuple):
+@xt.nTuple.decorate()
+class Handle_Print(typing.NamedTuple):
 
-    tags: xsm.Tags = xsm.Tags()
-    queue: collections.deque = collections.deque([])
-    
-    #  --
-
-    async def receive( # type: ignore[empty-body]
-        self, state: xsm.State
-    ): ...
-
-    async def flush( # type: ignore[empty-body]
-        self, broker: xsm.Broker
-    ) -> Observer_Incr: ...
-    
-    #  --
-
-    def matches(self, state: xsm.State):
+    def matches(
+        self,
+        observer: xsm.observers.Handled,
+        state: xsm.State
+    ) -> bool:
         return True
 
     async def handle(
         self, states: xsm.States, broker: xsm.Broker
-    ) -> Observer_Print:
+    ) -> Handle_Print:
         for state in states:
             print(state.curr)
         return self
@@ -127,9 +105,14 @@ async def main_example():
     iTuple(1.0)
     """
     broker: xsm.Broker = xsm.brokers.Simple()
+    
+    obs_incr: xsm.observers.Simple = xsm.observers.Simple.with_handler(Handle_Incr())
+
+    obs_print: xsm.observers.Simple =xsm.observers.Simple.with_handler(Handle_Print())
+
     observers = xsm.Observers([
-        Observer_Incr(),
-        Observer_Print(),
+        obs_incr,
+        obs_print,
     ])
 
     prices: Prices = Prices(
