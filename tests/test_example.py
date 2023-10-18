@@ -65,7 +65,7 @@ class Observer_Incr(typing.NamedTuple):
     
     #  --
 
-    async def matches(self, state: xsm.State):
+    def matches(self, state: xsm.State):
         return True
 
     async def handle(
@@ -99,7 +99,7 @@ class Observer_Print(typing.NamedTuple):
     
     #  --
 
-    async def matches(self, state: xsm.State):
+    def matches(self, state: xsm.State):
         return True
 
     async def handle(
@@ -138,5 +138,27 @@ async def main_example():
     prices = await prices.update(xt.Floats([.0]), broker)
 
     await xsm.loop(broker, observers, seconds = 5)
+
+# ------------------------------------------------------
+
+# class Asset:
+# tag: name? id?
+# state: value
+
+# class Position:
+# tag: ? asset
+# state: quantity
+# state: value (?)
+
+# class Strategy:
+# ...: positions
+# 
+
+
+# todo: make the tag an actual property
+# of individual fields
+# and tag as union of eg
+# name, id, etc. 
+# with user type as a final protocol (?)
 
 # ------------------------------------------------------

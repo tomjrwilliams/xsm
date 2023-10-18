@@ -41,7 +41,7 @@ class Simple(typing.Protocol):
     def queue(self) -> collections.deque: ...
 
     @abc.abstractmethod
-    async def matches(self, state: xsm.State) -> bool: ...
+    def matches(self, state: xsm.State) -> bool: ...
 
     @abc.abstractmethod
     async def handle(self, states: xsm.States) -> Simple: ...
@@ -54,7 +54,7 @@ class Simple(typing.Protocol):
 
     @staticmethod
     async def _receive(self: Simple, state: xsm.State[T]):
-        if (await self.matches(state)):
+        if self.matches(state):
             self.queue.append(state)
 
     @staticmethod

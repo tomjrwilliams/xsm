@@ -47,7 +47,9 @@ class Simple(typing.NamedTuple):
         states = xsm.States(self.queue)
         self.queue.clear()
         await asyncio.gather(
-            *states.map(lambda s: observers.map(
+            *states.map(lambda s: observers.filter(
+                operator.methodcaller("matches", s)
+            ).map(
                 operator.methodcaller("receive", s)
             )).flatten()
         )
