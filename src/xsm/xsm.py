@@ -171,6 +171,95 @@ async def flush(
 
     return res, done
 
+# TODO: remove the observers
+
+# states themselves acc and flush?
+
+# so then just loop broker flush
+
+# state acc flush -> new states.flatten()
+
+
+# one way is to build up a dict dynamically
+# mapping state to matching events
+
+# or vice versa, but then we have to reverse
+# to acc all in at once?
+
+# unless we acc concurrently
+
+# i suppose if we can call for event in broker:
+# generator
+
+# that draws from a continuously re-built back up queue
+
+# always append to the end and draw from the front
+
+# the only issue is the lack of parallelisation
+
+
+# the events can pile up if we're not batch handlnig indpendent events
+
+# but if we have an explodign event queue that will always be an isue?
+
+
+# i'd say then
+
+# both batch
+
+# but cut the batch and restart
+
+# at each collision, where the same 
+
+# state is triggered again in the batch
+
+
+# and or have some kind of secondary queue
+
+# or some notion of a reduce statement
+
+# for combined updates tro the state
+
+# including just implementing as a fold
+
+# on those within the batch
+
+# NOTE:
+
+# if they returned the events
+
+# as well as the state
+
+# or if the state is just the new value
+
+# together with the tags
+
+
+# then there's no need to worry about a central querue
+
+# can be just re-agg here
+
+
+# and so can presumably be multi thread executed
+
+
+# re-agg and fed back through
+
+
+# so no need to pass the broker
+
+
+# just return [state] [event]
+
+# or even just [state] and imply the events from the state
+
+# state, [state]
+# from left infer any changes to fire
+
+# right are assumed new
+
+# if left is none then retire
+
 async def loop(
     broker: Broker,
     observers: Observers, 

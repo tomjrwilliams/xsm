@@ -30,6 +30,9 @@ import xsm
 @xt.nTuple.decorate(**xsm.State.interface())
 class Prices(typing.NamedTuple):
 
+    # TODO: replace with separate tag fields
+    # on the named tuple
+
     tags: xsm.Tags
 
     # --
@@ -45,7 +48,93 @@ class Prices(typing.NamedTuple):
         broker: xsm.Broker
     ) -> Prices: ...
 
+    # TODO: needs matches, flush
+
+    # return from the flush as a list
+    # which is flattened back down for the loop
+
+    # ie so can spawn new states, and retire itself by returning empty 
+
 # ------------------------------------------------------
+
+# TODO:
+
+# return:
+
+# self state, two tuple
+# of either old, new or old none if retire
+
+# and then iterable of tuples
+
+# one tuple is event, no state
+
+# two tuple is a new state, presume prev is none
+
+
+# on match, generate a task
+
+# that will on run, call the relevant state handler returning the above
+
+
+# where the task should be given a callback
+
+# that updates the registry of states with the response for self
+
+# as well as cahcing the update and events into the qeue for processing
+
+
+# but that means we can't concecutively store up tasks
+
+# only one can be in flight per state at a given time
+
+# as once the task is created, the state is locked in
+
+
+# so the callback also needs ot handle that lock rtemoval
+
+# eg. just a set of currently in flight states
+
+# that we skip over from the qeue until done
+
+
+# https://docs.python.org/3.9/library/concurrent.futures.html#concurrent.futures.ProcessPoolExecutor
+
+# futures.as_completed
+
+# iterator of results
+
+# use the above for callbacks
+
+# once to do is less than a certain offset from workers
+
+# or timeout (?)
+
+# ie. certain number presumably idle
+
+# then collect up those not done and re batch
+
+# eg. then call wait on the rest with a tiny callback to filter into done and not done (if not all done)
+
+# and then go back to the queue to add to the remaining not done
+
+
+# so then we can have a central state registry keeping track of both what to schedule
+
+# including what states are already in flight
+
+# and what values each of the states have
+
+
+# so similar to the above, presumably if match
+
+# return a future (versus a task before)
+# that can be sent for execution
+
+
+# so the states need to be given the executor
+
+# when we know there's a match, for them to call executor.submit(...)
+
 
 @xt.nTuple.decorate()
 class Handle_Incr(typing.NamedTuple):
