@@ -52,7 +52,6 @@ class State(typing.Protocol[T]):
     def dependencies(
         cls
     ) -> xt.iTuple[typing.Type[State]]: ...
-    # @functools.lru_cache(maxsize=1)
 
     @abc.abstractmethod
     def matches(
