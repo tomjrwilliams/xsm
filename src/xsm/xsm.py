@@ -8,7 +8,10 @@ import functools
 import itertools
 
 import asyncio
+
 import multiprocessing as mp
+import multiprocessing.pool as mp_pool
+
 import concurrent.futures as conc_fut
 
 import typing
@@ -70,7 +73,7 @@ States = xt.iTuple[State[T]]
 iState = tuple[int, State]
 
 Res = typing.Union[State, tuple[State, States]]
-Res_Fut = conc_fut.Future[Res]
+Res_Async = mp_pool.AsyncResult[Res]
 
 Handler = typing.Callable[
     [State[T], State[V]], Res
@@ -101,9 +104,6 @@ def match_event(
             if s.matches(e):
                 yield i, s.handler(e)
 
-def error_callback(e):
-    raise e
-
 def f_submit(
     states: dict[int, State],
     s_queue: State_Queue,
@@ -115,8 +115,8 @@ def f_submit(
         int,
         typing.Callable,
         State,
-        conc_fut.Executor
-    ], Res_Fut
+        mp_pool.Pool
+    ], Res_Async
 ]:
     
     id = len(states)
@@ -126,6 +126,9 @@ def f_submit(
             nonlocal id
             nonlocal i
 
+            state: State
+            others: States
+
             # result: Res = res.result()
             
             if (
@@ -133,7 +136,7 @@ def f_submit(
                 and hasattr(result, "prev")
                 and hasattr(result, "persist")
             ):
-                state = result
+                state = typing.cast(State, result)
                 others = xt.iTuple()
             else:
                 state, others = result
@@ -206,11 +209,15 @@ def loop(
     s_queue: State_Queue = collections.deque(init)
     e_queue: Event_Queue = dict()
 
-    f_pending: set[Res_Fut] = set()
+    f_pending: set[Res_Async] = set()
     s_pending: set[int] = set()
 
-    depends_on = {}
-    triggers = {}
+    depends_on: dict[
+        typing.Type[State], set[typing.Type[State]]
+    ] = {}
+    triggers: dict[
+        typing.Type[State], set[typing.Type[State]]
+    ] = {}
 
     for s in init:
         t = type(s)
@@ -244,11 +251,15 @@ def loop(
         processes=processes,
     ) as pool:
 
+        n_workers: int
         # n_workers: int = len(executor._processes)
 
-        n_workers = processes
+        if processes is None:
+            n_workers = mp.cpu_count()
+        else:
+            n_workers = processes
+
         done: bool = False
-        
         it: int = 0
 
         while not done:

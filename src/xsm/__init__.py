@@ -19,7 +19,7 @@ from .xsm import (
     States,
     iState,
     Res,
-    Res_Fut,
+    Res_Async,
     Handler,
     Handler_Event,
     State_Queue,
