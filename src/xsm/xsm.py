@@ -49,14 +49,10 @@ class State(typing.Protocol[T]):
 
     @classmethod
     @abc.abstractmethod
-    def dependencies(
-        cls
-    ) -> xt.iTuple[typing.Type[State]]: ...
+    def dependencies(cls) -> xt.iTuple[typing.Type[State]]: ...
 
     @abc.abstractmethod
-    def matches(
-        self, state: State[V] #
-    ) -> bool: ...
+    def matches(self, state: State[V]) -> bool: ...
 
     @abc.abstractmethod
     def handler(
