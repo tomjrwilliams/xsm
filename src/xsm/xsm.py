@@ -8,6 +8,8 @@ import functools
 import itertools
 
 import asyncio
+import multiprocessing as mp
+import concurrent.futures as conc_fut
 
 import typing
 import datetime
@@ -27,273 +29,297 @@ import xtuples as xt
 # ------------------------------------------------------
 
 T = typing.TypeVar('T')
+V = typing.TypeVar('V')
 
 # ------------------------------------------------------
-
-
-class Tag(typing.Protocol):
-    pass
-
-
-Tags = xt.iTuple[Tag]
-
-
-# ------------------------------------------------------
-
-
-class Broker(typing.Protocol):
-
-    @abc.abstractmethod
-    async def receive(self, state: State[T]): ...
-
-    @abc.abstractmethod
-    async def flush(
-        self,
-        observers: Observers,
-    ) -> int: ...
-
-        
-# ------------------------------------------------------
-
-VorF = typing.Union[T, typing.Callable[[T], T]]
 
 class State(typing.Protocol[T]):
 
     @property
-    def curr(self) -> T: ...
-
-    @property
-    def tags(self) -> Tags: ...
+    def curr(self) -> typing.Optional[T]: ...
 
     @property
     def prev(self) -> typing.Optional[T]: ...
 
+    @property
+    def persist(self) -> bool: ...
+
+    @classmethod
     @abc.abstractmethod
-    async def update(
-        self: State[T], v_or_f: VorF[T], broker: Broker
-    ) -> State[T]: ...
+    def dependencies(
+        cls
+    ) -> xt.iTuple[typing.Type[State]]: ...
+    # @functools.lru_cache(maxsize=1)
 
     @abc.abstractmethod
-    def _replace(self: State[T], **kwargs) -> State[T]: ...
+    def matches(
+        self, state: State[V] #
+    ) -> bool: ...
 
-    @staticmethod
-    def interface():
-        return dict(update=update)
+    @abc.abstractmethod
+    def handler(
+        self, state: State[V] #
+    ) -> typing.Callable[
+        [State[T], State[V]], Res
+    ]: ...
+
+# ------------------------------------------------------
 
 States = xt.iTuple[State[T]]
 
-# ------------------------------------------------------
+iState = tuple[int, State]
 
-async def update(
-    self: State[T],
-    v_or_f: VorF[T],
-    broker: Broker,
-) -> State[T]:
+Res = typing.Union[State, tuple[State, States]]
+Res_Fut = conc_fut.Future[Res]
 
-    curr: T = self.curr
+Handler = typing.Callable[
+    [State[T], State[V]], Res
+]
 
-    if isinstance(v_or_f, type(curr)):
-        v = typing.cast(T, v_or_f)
-    else:
-        v = typing.cast(typing.Callable[[T], T], v_or_f)(curr)
+Handler_Event = tuple[Handler, State]
 
-    res = self._replace(curr=v, prev=curr)
-    await broker.receive(res)
-
-    return res
+State_Queue = collections.deque[State]
+Event_Queue = dict[
+    int, collections.deque[Handler_Event]
+]
 
 # ------------------------------------------------------
 
-class Observer(typing.Protocol):
-
-    # NOTE:
-    # matches() should be a simple tags vs tags comparison
-    # and thus doesn't need to be async (and should be natively parallelised within the map / filter - check?)
-    
-    # NOTE: receive(), however, may contain logic for eg.
-    # making db / io calls to log the relevant state change
-    # so does need to be async
-
-    # NOTE: likewise, flush() may well have external calling logic
-    # either to get data, or to store the event, other logging
-    # so does need to be async
-
-    # NOTE: because flush is called on every observer on every pass
-    # it functions as a heart-beat as well as event response
-    # at least assuming observers.Simple._flush(skip_empty=False)
-
-    @property
-    def tags(self) -> Tags: ...
-
-    @abc.abstractmethod
-    def matches(self, state: State) -> bool: ...
-
-    @abc.abstractmethod
-    async def receive(self, state: State): ...
-
-    @abc.abstractmethod
-    async def flush(self, broker: Broker) -> Observer: ...
-
-Observers = xt.iTuple[Observer]
-
-# ------------------------------------------------------
-
-async def flush(
-    awaitable,
-    f_done,
-    start: datetime.datetime,
-    seconds: typing.Optional[int] = None,
-    timeout: bool = True,
+def match_event(
+    e: State,
+    states: dict[int, State],
+    depends_on,
+    triggers,
 ):
-    elapsed: float = (
-        datetime.datetime.now() - start
-    ).seconds
+    t = type(e)
+    for i, s in states.items():
 
-    if seconds is None:
-        res = await awaitable
-        done = f_done(res)
-    elif elapsed >= seconds:
-        res = None
-        done = True
-    elif timeout:
-        try:
-            res = await asyncio.wait_for(
-                awaitable, 
-                timeout = seconds - elapsed
-            )
-            done = f_done(res)
-        except asyncio.TimeoutError:
-            res = None
-            done = True
-    else:
-        res = await awaitable
-        done = f_done(res)
+        if t not in triggers:
+            triggers[t] = set()
 
-    return res, done
+        if type(s) in triggers[t]:
+            if s.matches(e):
+                yield i, s.handler(e)
 
-# TODO: remove the observers
+def error_callback(e):
+    raise e
 
-# states themselves acc and flush?
+def f_submit(
+    states: dict[int, State],
+    s_queue: State_Queue,
+    s_pending: set[int],
+    depends_on,
+    triggers,
+) -> typing.Callable[
+    [
+        int,
+        typing.Callable,
+        State,
+        conc_fut.Executor
+    ], Res_Fut
+]:
+    
+    id = len(states)
 
-# so then just loop broker flush
+    def i_callback(i: int):
+        def callback(result: Res):
+            nonlocal id
+            nonlocal i
 
-# state acc flush -> new states.flatten()
+            # result: Res = res.result()
+            
+            if (
+                hasattr(result, "curr")
+                and hasattr(result, "prev")
+                and hasattr(result, "persist")
+            ):
+                state = result
+                others = xt.iTuple()
+            else:
+                state, others = result
 
+            if state.curr is None:
+                del states[i]
+            else:
+                states[i] = state
 
-# one way is to build up a dict dynamically
-# mapping state to matching events
+            for _i, s in enumerate((state,) + others):
+                t = type(s)
+            
+                if t not in depends_on:
 
-# or vice versa, but then we have to reverse
-# to acc all in at once?
+                    depends_on[t] = set(s.dependencies())
+                    
+                    for dep in depends_on[t]:
+                        if dep not in triggers:
+                            triggers[dep] = set()
+                        triggers[dep].add(t)
 
-# unless we acc concurrently
+                if _i > 0 and s.persist:
+                    id += 1
+                    states[id] = s
 
-# i suppose if we can call for event in broker:
-# generator
+                s_pending.remove(i)
 
-# that draws from a continuously re-built back up queue
+            s_queue.append(state)
+            s_queue.extend(others)
 
-# always append to the end and draw from the front
+            return
+        return callback
 
-# the only issue is the lack of parallelisation
+    # def f(i, h, e, executor: conc_fut.Executor):
 
+    def f(i, h, e, pool):
+        s = states[i]
+        s_pending.add(i)
 
-# the events can pile up if we're not batch handlnig indpendent events
+        # fut = executor.submit(h, s, e)
+        # fut.add_done_callback(i_callback(i))
 
-# but if we have an explodign event queue that will always be an isue?
+        fut = pool.apply_async(
+            h,
+            (s, e,),
+            callback=i_callback(i),
+        )
 
+        return fut
+    return f
 
-# i'd say then
+# ------------------------------------------------------
 
-# both batch
+def loop(
+    init: States,
+    *,
+    iters: typing.Optional[int] = None,
+    timeout: typing.Optional[float] = None,
+    processes: typing.Optional[int] = None,
+) -> States:
 
-# but cut the batch and restart
-
-# at each collision, where the same 
-
-# state is triggered again in the batch
-
-
-# and or have some kind of secondary queue
-
-# or some notion of a reduce statement
-
-# for combined updates tro the state
-
-# including just implementing as a fold
-
-# on those within the batch
-
-# NOTE:
-
-# if they returned the events
-
-# as well as the state
-
-# or if the state is just the new value
-
-# together with the tags
-
-
-# then there's no need to worry about a central querue
-
-# can be just re-agg here
-
-
-# and so can presumably be multi thread executed
-
-
-# re-agg and fed back through
-
-
-# so no need to pass the broker
-
-
-# just return [state] [event]
-
-# or even just [state] and imply the events from the state
-
-# state, [state]
-# from left infer any changes to fire
-
-# right are assumed new
-
-# if left is none then retire
-
-async def loop(
-    broker: Broker,
-    observers: Observers, 
-    seconds: typing.Optional[int] = None,
-    timeout: bool = True,
-    iters: typing.Optional[int] = None
-) -> Observers:
-
-    done = False
     start = datetime.datetime.now()
-    i = 0
 
-    while not done:
-        if iters is not None and i == iters:
-            break
-        _observers, done = await flush(
-            asyncio.gather(*observers.map(
-                operator.methodcaller("flush", broker)
-            )),
-            lambda _: done,
-            start,
-            seconds=seconds,
-            timeout=timeout,
-        )
-        observers = xt.iTuple(_observers)
-        _, done = await flush(
-            broker.flush(observers),
-            lambda changes: changes == 0,
-            start,
-            seconds=seconds,
-            timeout=timeout,
-        )
-        i += 1
+    states: dict[int, State] = dict(
+        init.filter(lambda s: s.persist)
+        .enumerate()
+        #
+    )
 
-    return observers
+    s_queue: State_Queue = collections.deque(init)
+    e_queue: Event_Queue = dict()
+
+    f_pending: set[Res_Fut] = set()
+    s_pending: set[int] = set()
+
+    depends_on = {}
+    triggers = {}
+
+    for s in init:
+        t = type(s)
+        if t not in depends_on:
+            depends_on[t] = set(s.dependencies())
+
+    for t, deps in depends_on.items():
+        for dep in deps:
+            if dep not in triggers:
+                triggers[dep] = set()
+            triggers[dep].add(t)
+
+    submit = f_submit(
+        states,
+        s_queue,
+        s_pending,
+        depends_on,
+        triggers,
+    )
+
+    i: int
+    e: State
+    h: Handler
+    
+    # with conc_fut.ProcessPoolExecutor(
+    #     max_workers=max_workers,
+    #     # 
+    # ) as executor:
+
+    with mp.Pool(
+        processes=processes,
+    ) as pool:
+
+        # n_workers: int = len(executor._processes)
+
+        n_workers = processes
+        done: bool = False
+        
+        it: int = 0
+
+        while not done:
+
+            while len(f_pending) >= n_workers:
+                f_pending = set(
+                    f for f in f_pending
+                    if not f.ready()
+                )
+                # f_done, f_pending = conc_fut.wait(
+                #     f_pending,
+                #     timeout = (
+                #         None if timeout is None
+                #         else (
+                #             datetime.datetime.now() - start
+                #         ).total_seconds()
+                #     ),
+                #     return_when=conc_fut.FIRST_COMPLETED,
+                # )
+                # n_done += len(f_done)
+
+            if len(e_queue):
+                e_pop = set()
+                for i, es in e_queue.items():
+                    if i in s_pending:
+                        continue
+
+                    h, e = es.popleft()
+                    if not len(es):
+                        e_pop.add(i)
+
+                    f_pending.add(submit(
+                        i, h, e, pool
+                    ))
+
+                for i in e_pop:
+                    e_queue.pop(i)
+
+            if len(s_queue):
+                e = s_queue.popleft()
+
+                for i, h in match_event(
+                    e, states, depends_on, triggers
+                ):
+                    if not i in s_pending:
+                        f_pending.add(submit(
+                            i, h, e, pool
+                        ))
+                        continue
+
+                    if i not in e_queue:
+                        e_queue[i] = collections.deque([])
+                    e_queue[i].append((h, e,))
+
+            if timeout is not None:
+                done = done or (
+                    datetime.datetime.now() - start
+                ).total_seconds() > timeout
+            
+            if iters is not None:
+                done = done or it >= iters
+            
+            if (
+                not len(f_pending)
+                and not len(s_queue)
+                and not len(e_queue)
+            ):
+                done = True
+            
+            it += 1
+            
+    return States(states.values())
 
 # ------------------------------------------------------
