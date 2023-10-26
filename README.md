@@ -68,7 +68,7 @@ class State(typing.Protocol[T]):
 
 ```
 
-Upon completion, the updated value of the state is assigned to the central state look-up table (unless current is set to None, when it is retired).
+Upon completion, the updated value of the state is assigned to the central state look-up table (unless current is set to None, in which case it is retired).
 
 Whilst there are no guarantees on the order that events are applied to a given state, we do at least guarantee that only one operation can be in flight for a given state at a time (with the others added to a queue for later execution).
 

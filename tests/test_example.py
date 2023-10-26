@@ -34,6 +34,11 @@ V = typing.TypeVar('V')
 
 # ------------------------------------------------------
 
+def handle_prices(state: Prices, event: Prices) -> Prices:
+    return state._replace(
+        curr=state.curr.map(lambda v: v + 0.1),
+        prev=state.curr,
+    )
 
 @xt.nTuple.decorate()
 class Prices(typing.NamedTuple):
@@ -57,23 +62,14 @@ class Prices(typing.NamedTuple):
             Prices,
         ))
     
-    def matches(self, state: xsm.State) -> bool:
+    def matches(self, event: xsm.Event) -> bool:
         return True
-    
-    @staticmethod
-    def handle_prices(
-        state: Prices, event: Prices
-    ):
-        return state._replace(
-            curr=state.curr.map(lambda v: v + 0.1),
-            prev=state.curr,
-        )
 
-    def handler(self, state: xsm.State[V]) -> typing.Callable[
-        [Prices, xsm.State[V]], xsm.Res
-    ]:
-        if isinstance(state, Prices):
-            return self.handle_prices
-        assert False, state
+    def handler(self, event: xsm.Event):
+        if isinstance(event, Prices):
+            return handle_prices
+        assert False, event
 
 # ------------------------------------------------------
+
+p: xsm.State = Prices(xt.Floats([1.]))

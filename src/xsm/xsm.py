@@ -12,8 +12,6 @@ import asyncio
 import multiprocessing as mp
 import multiprocessing.pool as mp_pool
 
-import concurrent.futures as conc_fut
-
 import typing
 import datetime
 
@@ -32,7 +30,21 @@ import xtuples as xt
 # ------------------------------------------------------
 
 T = typing.TypeVar('T')
+U = typing.TypeVar('U', covariant=True)
 V = typing.TypeVar('V')
+
+# ------------------------------------------------------
+
+class Message(typing.Protocol[U]):
+
+    @property
+    def curr(self) -> typing.Optional[U]: ...
+
+    @property
+    def prev(self) -> typing.Optional[U]: ...
+
+    @property
+    def persist(self) -> bool: ...
 
 # ------------------------------------------------------
 
@@ -52,31 +64,38 @@ class State(typing.Protocol[T]):
     def dependencies(cls) -> xt.iTuple[typing.Type[State]]: ...
 
     @abc.abstractmethod
-    def matches(self, state: State[V]) -> bool: ...
+    def matches(
+        self: State[T], 
+        event: typing.Union[Message[V], State[U]]
+    ) -> bool: ...
 
     @abc.abstractmethod
     def handler(
-        self, state: State[V] #
+        self: State[T], 
+        event: typing.Union[Message[V], State[U]] #
     ) -> typing.Callable[
-        [State[T], State[V]], Res
+        [State[T], typing.Union[Message[V], State[U]]], Res
     ]: ...
 
 # ------------------------------------------------------
 
-States = xt.iTuple[State[T]]
+Event = typing.Union[Message, State]
+Events = xt.iTuple[Event]
+
+States = xt.iTuple[State]
 
 iState = tuple[int, State]
 
-Res = typing.Union[State, tuple[State, States]]
+Res = typing.Union[State, tuple[State, Events]]
 Res_Async = mp_pool.AsyncResult[Res]
 
 Handler = typing.Callable[
-    [State[T], State[V]], Res
+    [State, Event], Res
 ]
 
-Handler_Event = tuple[Handler, State]
+Handler_Event = tuple[Handler, Event]
 
-State_Queue = collections.deque[State]
+State_Queue = collections.deque[Event]
 Event_Queue = dict[
     int, collections.deque[Handler_Event]
 ]
@@ -84,7 +103,7 @@ Event_Queue = dict[
 # ------------------------------------------------------
 
 def match_event(
-    e: State,
+    e: Event,
     states: dict[int, State],
     depends_on,
     triggers,
@@ -109,7 +128,7 @@ def f_submit(
     [
         int,
         typing.Callable,
-        State,
+        Event,
         mp_pool.Pool
     ], Res_Async
 ]:
@@ -121,11 +140,12 @@ def f_submit(
             nonlocal id
             nonlocal i
 
-            state: State
-            others: States
+            state: Event
+            others: Events
 
             # result: Res = res.result()
             
+            # NOTE: below is because we can return a single state rather than an iterable so have to disambiguate, because states themselves as generally namedtuples are themselves iterable
             if (
                 hasattr(result, "curr")
                 and hasattr(result, "prev")
@@ -138,8 +158,8 @@ def f_submit(
 
             if state.curr is None:
                 del states[i]
-            else:
-                states[i] = state
+            elif state.persist:
+                states[i] = typing.cast(State, state)
 
             for _i, s in enumerate((state,) + others):
                 t = type(s)
@@ -186,7 +206,7 @@ def f_submit(
 # ------------------------------------------------------
 
 def loop(
-    init: States,
+    init: Events,
     *,
     iters: typing.Optional[int] = None,
     timeout: typing.Optional[float] = None,
@@ -197,6 +217,7 @@ def loop(
 
     states: dict[int, State] = dict(
         init.filter(lambda s: s.persist)
+        .map(lambda s: typing.cast(State, s))
         .enumerate()
         #
     )
@@ -234,7 +255,7 @@ def loop(
     )
 
     i: int
-    e: State
+    e: Event
     h: Handler
     
     # with conc_fut.ProcessPoolExecutor(
